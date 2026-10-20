@@ -2,15 +2,24 @@
 
 const $ = (id) => document.getElementById(id);
 
+/* ⚙️ Login com Discord (OAuth2 implicit grant — não precisa de servidor).
+   Regista esta página em Developer Portal → OAuth2 → Redirects. */
+const CONFIG = {
+  clientId: '1551238667492790352', // ← Application ID do teu app do Discord
+};
+
 const estado = {
-  url: localStorage.getItem('miku-dash/url') || 'http://127.0.0.1:8787',
-  token: localStorage.getItem('miku-dash/token') || 'GkgJwY6AeyblebESm2Jy9NhrjylD9iFU',
+  url: localStorage.getItem('miku-dash/url') || 'http://localhost:8787',
+  token: localStorage.getItem('miku-dash/token') || '',
   guildId: localStorage.getItem('miku-dash/guild') || '1501482046693052466',
   guilds: [],
   canais: [],
   ligado: false,
   timer: null,
+  rankTipo: 'xp',
 };
+
+const discord = { user: null, token: null };
 
 /* ═══ helpers ═══ */
 
@@ -59,6 +68,138 @@ async function api(caminho, opcoes = {}) {
   return dados;
 }
 
+function mostrarCartoes(ligado) {
+  for (const id of ['cartao-estado', 'cartao-boasvindas', 'cartao-verificacao',
+    'cartao-contadores', 'cartao-anuncio', 'cartao-lembrete', 'cartao-moderacao',
+    'cartao-rankings', 'cartao-say', 'cartao-logs']) {
+    $(id).hidden = !ligado;
+  }
+}
+
+/* ══════════════════ LOGIN COM DISCORD ══════════════════ */
+
+function guardarSessao(chave, valor) {
+  try {
+    if (valor === null) sessionStorage.removeItem(chave);
+    else sessionStorage.setItem(chave, valor);
+  } catch { /* modo privado — a sessão simplesmente não persiste */ }
+}
+
+function lerSessao(chave) {
+  try { return sessionStorage.getItem(chave); } catch { return null; }
+}
+
+function estadoAleatorio() {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function redirectUri() {
+  // ⚠️ Tem de estar igualzinho em Developer Portal → OAuth2 → Redirects
+  return window.location.origin + window.location.pathname;
+}
+
+function loginDiscord() {
+  if (!CONFIG.clientId) {
+    hint('hint-login', '⚠️ Define o clientId em app.js primeiro (Application ID do Discord).', 'erro');
+    return;
+  }
+  const state = estadoAleatorio();
+  guardarSessao('miku-dash/oauth-state', state);
+  const params = new URLSearchParams({
+    response_type: 'token',
+    client_id: CONFIG.clientId,
+    redirect_uri: redirectUri(),
+    scope: 'identify',
+    state,
+  });
+  window.location.href = `https://discord.com/oauth2/authorize?${params.toString()}`;
+}
+
+function logoutDiscord() {
+  guardarSessao('miku-dash/oauth', null);
+  discord.user = null;
+  discord.token = null;
+  renderizarUtilizador();
+  hint('hint-ligacao', '👋 Sais-te da conta do Discord.');
+}
+
+async function tratarRedirect() {
+  const hash = new URLSearchParams(window.location.hash.slice(1));
+  const token = hash.get('access_token');
+  if (!token) return;
+  const state = hash.get('state');
+  const esperado = lerSessao('miku-dash/oauth-state');
+  guardarSessao('miku-dash/oauth-state', null);
+  // tira o token da barra de endereço
+  history.replaceState(null, '', window.location.pathname + window.location.search);
+  if (!state || state !== esperado) {
+    hint('hint-login', '❌ Login recusado (state inválido) — tenta outra vez.', 'erro');
+    return;
+  }
+  const expira = Date.now() + Number(hash.get('expires_in') || 604800) * 1000;
+  guardarSessao('miku-dash/oauth', JSON.stringify({ token, expira }));
+  localStorage.removeItem('miku-dash/convidado');
+}
+
+async function carregarUtilizador() {
+  let guardado = null;
+  try { guardado = JSON.parse(lerSessao('miku-dash/oauth') || 'null'); } catch { guardado = null; }
+  if (!guardado || !guardado.token) return;
+  if (guardado.expira < Date.now()) {
+    guardarSessao('miku-dash/oauth', null);
+    return;
+  }
+  try {
+    const resp = await fetch('https://discord.com/api/v10/users/@me', {
+      headers: { Authorization: `Bearer ${guardado.token}` },
+    });
+    if (!resp.ok) throw new Error(`Discord API: ${resp.status}`);
+    discord.token = guardado.token;
+    discord.user = await resp.json();
+  } catch {
+    discord.user = null;
+    hint('hint-ligacao', '⚠️ Sessão do Discord expirada — entra outra vez.', 'erro');
+  }
+}
+
+function renderizarUtilizador() {
+  const chip = $('user-chip');
+  const btnLogin = $('btn-discord-login');
+  if (discord.user) {
+    const nome = discord.user.global_name || discord.user.username;
+    $('user-nome').textContent = nome;
+    const avatar = discord.user.avatar
+      ? `https://cdn.discordapp.com/avatars/${discord.user.id}/${discord.user.avatar}.png?size=64`
+      : `https://cdn.discordapp.com/embed/avatars/${Number(BigInt(discord.user.id) >> 22n) % 6}.png`;
+    $('user-avatar').src = avatar;
+    chip.hidden = false;
+    btnLogin.hidden = true;
+    $('heroi-saudacao').textContent = `Olá, ${nome}! 🎤`;
+    $('login-overlay').hidden = true;
+  } else {
+    chip.hidden = true;
+    btnLogin.hidden = false;
+    $('heroi-saudacao').textContent = 'Bem-vinda(o) ao painel! 🎤';
+  }
+}
+
+function decidirLogin() {
+  // Overlay de login: à primeira visita (ou sem sessão), senão segue
+  if (discord.user) return;
+  if (!localStorage.getItem('miku-dash/convidado')) {
+    $('login-overlay').hidden = false;
+  }
+}
+
+async function initDiscord() {
+  await tratarRedirect();
+  await carregarUtilizador();
+  renderizarUtilizador();
+  decidirLogin();
+}
+
 /* ═══ ligação ═══ */
 
 async function ligar() {
@@ -78,13 +219,11 @@ async function ligar() {
     estado.ligado = true;
     pill('online', 'Ligado');
     hint('hint-ligacao', 'Ligação estabelecida! 🩵', 'ok');
-    $('cartao-estado').hidden = false;
-    $('cartao-boasvindas').hidden = false;
-    $('cartao-say').hidden = false;
-    $('cartao-logs').hidden = false;
+    mostrarCartoes(true);
     await carregarEstado();
     await carregarGuilds();
     await carregarLogs();
+    await carregarRanking(estado.rankTipo);
     estado.timer = setInterval(carregarLogs, 15000);
   } catch (erro) {
     estado.ligado = false;
@@ -98,10 +237,7 @@ function desligar() {
   clearInterval(estado.timer);
   pill('', 'Desligado');
   hint('hint-ligacao', 'Desligado do bot.');
-  $('cartao-estado').hidden = true;
-  $('cartao-boasvindas').hidden = true;
-  $('cartao-say').hidden = true;
-  $('cartao-logs').hidden = true;
+  mostrarCartoes(false);
 }
 
 /* ═══ estado + servidores ═══ */
@@ -133,16 +269,18 @@ async function carregarGuilds() {
     }
     estado.guildId = select.value;
     await carregarConfig();
+    await carregarVerificacao();
+    await carregarContadores();
+    await carregarRanking(estado.rankTipo);
   } catch (erro) {
     hint('hint-ligacao', `Servidores: ${erro.message}`, 'erro');
   }
 }
 
-/* ═══ boas-vindas ═══ */
+/* ═══ canais + config ═══ */
 
 function preencherCanais(canais, selecionado) {
-  for (const id of ['select-canal', 'select-canal-say']) {
-    const select = $(id);
+  for (const select of document.querySelectorAll('.canal-select')) {
     select.innerHTML = canais
       .map((c) => `<option value="${c.id}"># ${escapar(c.nome)}</option>`)
       .join('');
@@ -199,6 +337,188 @@ async function testarBoasVindas() {
   }
 }
 
+/* ═══ verificação ═══ */
+
+async function carregarVerificacao() {
+  if (!estado.guildId) return;
+  try {
+    const dados = await api(`/api/verificacao?guild_id=${estado.guildId}`);
+    const select = $('select-cargo-verif');
+    select.innerHTML = (dados.cargos || [])
+      .map((c) => `<option value="${c.id}">@ ${escapar(c.nome)}</option>`)
+      .join('');
+    if (dados.cargo_id) select.value = dados.cargo_id;
+    hint('hint-verif', dados.cargo_nome
+      ? `Cargo atual: @${dados.cargo_nome}` : 'Ainda sem cargo definido.');
+  } catch (erro) {
+    hint('hint-verif', `Verificação: ${erro.message}`, 'erro');
+  }
+}
+
+async function guardarVerificacao() {
+  try {
+    const dados = await api('/api/verificacao', {
+      method: 'POST',
+      body: JSON.stringify({
+        guild_id: estado.guildId,
+        cargo_id: $('select-cargo-verif').value,
+      }),
+    });
+    hint('hint-verif', `✅ Cargo guardado: @${dados.cargo_nome}`, 'ok');
+  } catch (erro) {
+    hint('hint-verif', `Erro: ${erro.message}`, 'erro');
+  }
+}
+
+async function publicarVerificacao() {
+  try {
+    await api('/api/verificacao/painel', {
+      method: 'POST',
+      body: JSON.stringify({
+        guild_id: estado.guildId,
+        channel_id: $('select-canal-verif').value,
+      }),
+    });
+    hint('hint-verif', '📢 Painel de verificação publicado!', 'ok');
+  } catch (erro) {
+    hint('hint-verif', `Erro: ${erro.message}`, 'erro');
+  }
+}
+
+/* ═══ contadores ═══ */
+
+async function carregarContadores() {
+  if (!estado.guildId) return;
+  try {
+    const dados = await api(`/api/contadores?guild_id=${estado.guildId}`);
+    const lista = $('lista-contadores');
+    const itens = dados.contadores || [];
+    lista.innerHTML = itens.length
+      ? itens.map((c) => `
+        <li>
+          <span>📊 <b>#${escapar(c.nome)}</b> — <code>${escapar(c.modelo)}</code></span>
+          <button class="botao fantasma pequeno" data-contador="${c.canal_id}">🗑️</button>
+        </li>`).join('')
+      : '<li>Ainda sem contadores.</li>';
+  } catch (erro) {
+    hint('hint-contadores', `Contadores: ${erro.message}`, 'erro');
+  }
+}
+
+async function criarContador() {
+  const modelo = $('input-modelo').value.trim();
+  if (!modelo) return hint('hint-contadores', 'Escreve o texto do contador.', 'erro');
+  try {
+    await api('/api/contadores', {
+      method: 'POST',
+      body: JSON.stringify({ guild_id: estado.guildId, acao: 'criar', modelo }),
+    });
+    $('input-modelo').value = '';
+    hint('hint-contadores', '✅ Contador criado!', 'ok');
+    await carregarContadores();
+  } catch (erro) {
+    hint('hint-contadores', `Erro: ${erro.message}`, 'erro');
+  }
+}
+
+async function removerContador(canalId) {
+  try {
+    await api('/api/contadores', {
+      method: 'POST',
+      body: JSON.stringify({ guild_id: estado.guildId, acao: 'remover', canal_id: canalId }),
+    });
+    hint('hint-contadores', '🗑️ Contador removido.', 'ok');
+    await carregarContadores();
+  } catch (erro) {
+    hint('hint-contadores', `Erro: ${erro.message}`, 'erro');
+  }
+}
+
+/* ═══ anúncio em embed ═══ */
+
+async function enviarEmbed() {
+  try {
+    await api('/api/embed', {
+      method: 'POST',
+      body: JSON.stringify({
+        guild_id: estado.guildId,
+        channel_id: $('select-canal-embed').value,
+        titulo: $('input-titulo').value,
+        descricao: $('input-descricao').value,
+        cor: $('input-cor').value,
+        rodape: $('input-rodape').value,
+      }),
+    });
+    hint('hint-embed', '📢 Anúncio enviado!', 'ok');
+  } catch (erro) {
+    hint('hint-embed', `Erro: ${erro.message}`, 'erro');
+  }
+}
+
+/* ═══ lembretes ═══ */
+
+async function agendarLembrete() {
+  const texto = $('input-lembrete').value.trim();
+  if (!texto) return hint('hint-lembrete', 'Escreve o lembrete primeiro.', 'erro');
+  try {
+    const dados = await api('/api/lembrete', {
+      method: 'POST',
+      body: JSON.stringify({
+        guild_id: estado.guildId,
+        channel_id: $('select-canal-lembrete').value,
+        minutos: $('input-minutos').value,
+        texto,
+      }),
+    });
+    $('input-lembrete').value = '';
+    hint('hint-lembrete', `⏰ Lembrete agendado para daqui a ${dados.minutos} min!`, 'ok');
+  } catch (erro) {
+    hint('hint-lembrete', `Erro: ${erro.message}`, 'erro');
+  }
+}
+
+/* ═══ moderação rápida ═══ */
+
+async function limparMensagens() {
+  const quantidade = $('input-quantidade').value;
+  if (!confirm(`Apagar ${quantidade} mensagens? Esta ação não pode ser desfeita.`)) return;
+  try {
+    const dados = await api('/api/moderacao/limpar', {
+      method: 'POST',
+      body: JSON.stringify({
+        guild_id: estado.guildId,
+        channel_id: $('select-canal-mod').value,
+        quantidade,
+      }),
+    });
+    hint('hint-mod', `🧹 ${dados.apagadas} mensagens apagadas.`, 'ok');
+  } catch (erro) {
+    hint('hint-mod', `Erro: ${erro.message}`, 'erro');
+  }
+}
+
+/* ═══ rankings ═══ */
+
+async function carregarRanking(tipo) {
+  if (!estado.ligado || !estado.guildId) return;
+  estado.rankTipo = tipo;
+  try {
+    const dados = await api(`/api/leaderboard?tipo=${tipo}&guild_id=${estado.guildId}`);
+    const lista = $('lista-ranking');
+    const top = dados.top || [];
+    lista.innerHTML = top.length
+      ? top.map((l, i) => `
+        <li>
+          <span class="pos">${i + 1}.</span>
+          <span><b>${escapar(l.nome)}</b> <span class="extra">${escapar(l.extra)}</span></span>
+          <span class="valor">${l.valor}</span>
+        </li>`).join('')
+      : '<li>Ainda sem dados.</li>';
+  } catch (erro) {
+    hint('hint-ligacao', `Ranking: ${erro.message}`, 'erro');
+  }
+}
+
 /* ═══ falar como a Miku ═══ */
 
 async function enviarMensagem() {
@@ -248,11 +568,40 @@ $('btn-testar').addEventListener('click', testarBoasVindas);
 $('btn-enviar').addEventListener('click', enviarMensagem);
 $('btn-logs').addEventListener('click', carregarLogs);
 
+$('btn-guardar-verif').addEventListener('click', guardarVerificacao);
+$('btn-publicar-verif').addEventListener('click', publicarVerificacao);
+$('btn-contador-criar').addEventListener('click', criarContador);
+$('btn-enviar-embed').addEventListener('click', enviarEmbed);
+$('btn-lembrete').addEventListener('click', agendarLembrete);
+$('btn-limpar').addEventListener('click', limparMensagens);
+$('btn-rank-refresh').addEventListener('click', () => carregarRanking(estado.rankTipo));
+
+for (const btn of document.querySelectorAll('[data-rank]')) {
+  btn.addEventListener('click', () => carregarRanking(btn.dataset.rank));
+}
+
+$('lista-contadores').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-contador]');
+  if (btn) removerContador(btn.dataset.contador);
+});
+
+$('btn-discord-login').addEventListener('click', loginDiscord);
+$('btn-login-discord').addEventListener('click', loginDiscord);
+$('btn-discord-logout').addEventListener('click', logoutDiscord);
+$('btn-continuar').addEventListener('click', () => {
+  localStorage.setItem('miku-dash/convidado', '1');
+  $('login-overlay').hidden = true;
+});
+
 $('select-guild').addEventListener('change', (e) => {
   estado.guildId = e.target.value;
   localStorage.setItem('miku-dash/guild', estado.guildId);
   carregarConfig();
+  carregarVerificacao();
+  carregarContadores();
+  carregarRanking(estado.rankTipo);
 });
 
-// Liga automaticamente se já tínhamos credenciais guardadas
+// Sessão do Discord + ligação automática se já tínhamos credenciais guardadas
+initDiscord();
 if (estado.url && estado.token) ligar();
