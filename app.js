@@ -51,9 +51,16 @@ function escapar(texto) {
     .replaceAll('>', '&gt;');
 }
 
-async function api(caminho, opcoes = {}) {
+function baseApi() {
+  // O protocolo é SEMPRE o da página: HTTPS não pode falar HTTP (Mixed Content)
+  // e aceitamos o URL com ou sem http:// na frente (fica normalizado aqui).
   const protocolo = window.location.protocol === 'https:' ? 'https:' : 'http:';
-  const resp = await fetch(`${protocolo}//${estado.url}${caminho}`, {
+  const base = estado.url.trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+  return `${protocolo}//${base}`;
+}
+
+async function api(caminho, opcoes = {}) {
+  const resp = await fetch(`${baseApi()}${caminho}`, {
     ...opcoes,
     headers: {
       Authorization: `Bearer ${estado.token}`,
@@ -120,7 +127,7 @@ function loginDiscord() {
 
 function logoutDiscord() {
   guardarSessao('miku-dash/oauth', null);
-  localStorage.removeItem('miku-dash/convidado');
+  localStorage.setItem('miku-dash/convidado', '1');
   discord.user = null;
   discord.token = null;
   renderizarUtilizador();
@@ -231,7 +238,12 @@ async function ligar() {
   } catch (erro) {
     estado.ligado = false;
     pill('erro', 'Sem ligação');
-    hint('hint-ligacao', `Falha: ${erro.message}`, 'erro');
+    let msg = erro.message;
+    if (window.location.protocol === 'https:' && erro instanceof TypeError) {
+      msg += ' — o site é HTTPS, por isso a API do bot tem de responder em HTTPS '
+        + '(se o teu bot só tem HTTP, expõe-o com TLS/túnel ou testa primeiro numa página http:// local).';
+    }
+    hint('hint-ligacao', `Falha: ${msg}`, 'erro');
   }
 }
 
