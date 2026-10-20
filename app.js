@@ -52,7 +52,8 @@ function escapar(texto) {
 }
 
 async function api(caminho, opcoes = {}) {
-  const resp = await fetch(`${estado.url}${caminho}`, {
+  const protocolo = window.location.protocol === 'https:' ? 'https:' : 'http:';
+  const resp = await fetch(`${protocolo}//${estado.url}${caminho}`, {
     ...opcoes,
     headers: {
       Authorization: `Bearer ${estado.token}`,
