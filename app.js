@@ -9,8 +9,8 @@ const CONFIG = {
 };
 
 const estado = {
-  url: localStorage.getItem('miku-dash/url') || 'http://127.0.0.1:8787',
-  token: localStorage.getItem('miku-dash/token') || 'Nd8V1hTWBnpqs_6Vcy6F1DOlbbICx9gl',
+  url: localStorage.getItem('miku-dash/url') || '',
+  token: localStorage.getItem('miku-dash/token') || '',
   guildId: localStorage.getItem('miku-dash/guild') || '1501482046693052466',
   guilds: [],
   canais: [],
@@ -120,10 +120,12 @@ function loginDiscord() {
 
 function logoutDiscord() {
   guardarSessao('miku-dash/oauth', null);
+  localStorage.removeItem('miku-dash/convidado');
   discord.user = null;
   discord.token = null;
   renderizarUtilizador();
-  hint('hint-ligacao', '👋 Sais-te da conta do Discord.');
+  hint('hint-ligacao', '👋 Sair da conta do Discord.');
+  $('login-overlay').hidden = true;
 }
 
 async function tratarRedirect() {
