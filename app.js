@@ -3,8 +3,8 @@
 const $ = (id) => document.getElementById(id);
 
 const estado = {
-  url: localStorage.getItem('miku-dash/url') || 'http://localhost:8787',
-  token: localStorage.getItem('miku-dash/token') || '',
+  url: localStorage.getItem('miku-dash/url') || 'http://127.0.0.1:8787',
+  token: localStorage.getItem('miku-dash/token') || 'GkgJwY6AeyblebESm2Jy9NhrjylD9iFU',
   guildId: localStorage.getItem('miku-dash/guild') || '1501482046693052466',
   guilds: [],
   canais: [],
