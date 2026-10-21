@@ -2,19 +2,26 @@
 
 const $ = (id) => document.getElementById(id);
 
-/* ⚙️ Login com Discord (OAuth2 implicit grant — não precisa de servidor).
-   Regista esta página em Developer Portal → OAuth2 → Redirects. */
+/* ⚙️ Auto-conexão.
+   Quando o painel é servido PELO PRÓPRIO BOT (python -m bot.main), o servidor
+   injeta `window.MIKU_BOOT` com a URL (mesma origem) e o token do painel.
+   Assim o bot é reconhecido automaticamente — sem digitar URL nem token.
+   Se o painel for aberto sozinho (ex.: Vercel), cai no modo manual antigo. */
+const BOOT = window.MIKU_BOOT || null;
+const AUTO = !!(BOOT && BOOT.autoConnect);
+
 const CONFIG = {
-  clientId: '1551238667492790352', // ← Application ID do teu app do Discord
+  clientId: (BOOT && BOOT.clientId) || '1551238667492790352', // Application ID do Discord
 };
 
 const estado = {
-  url: localStorage.getItem('miku-dash/url') || '',
-  token: localStorage.getItem('miku-dash/token') || '',
+  url: AUTO ? (BOOT.apiUrl || window.location.host) : (localStorage.getItem('miku-dash/url') || ''),
+  token: AUTO ? (BOOT.token || '') : (localStorage.getItem('miku-dash/token') || ''),
   guildId: localStorage.getItem('miku-dash/guild') || '1501482046693052466',
   guilds: [],
   canais: [],
   ligado: false,
+  auto: AUTO,
   timer: null,
   rankTipo: 'xp',
 };
@@ -196,8 +203,10 @@ function renderizarUtilizador() {
 }
 
 function decidirLogin() {
-  // Overlay de login: à primeira visita (ou sem sessão), senão segue
+  // Overlay de login: à primeira visita (ou sem sessão), senão segue.
+  // No modo auto (servido pelo bot) não bloqueia com login — o bot já é reconhecido.
   if (discord.user) return;
+  if (AUTO) return;
   if (!localStorage.getItem('miku-dash/convidado')) {
     $('login-overlay').hidden = false;
   }
@@ -213,10 +222,14 @@ async function initDiscord() {
 /* ═══ ligação ═══ */
 
 async function ligar() {
-  estado.url = $('input-url').value.trim().replace(/\/$/, '');
-  estado.token = $('input-token').value.trim();
-  localStorage.setItem('miku-dash/url', estado.url);
-  localStorage.setItem('miku-dash/token', estado.token);
+  // No modo manual, lê e guarda o que o utilizador escreveu.
+  // No modo auto (servido pelo bot), usa a config injetada — sem digitar nada.
+  if (!estado.auto) {
+    estado.url = $('input-url').value.trim().replace(/\/$/, '');
+    estado.token = $('input-token').value.trim();
+    localStorage.setItem('miku-dash/url', estado.url);
+    localStorage.setItem('miku-dash/token', estado.token);
+  }
 
   if (!estado.url || !estado.token) {
     hint('hint-ligacao', 'Preenche a URL e o token.', 'erro');
@@ -229,6 +242,7 @@ async function ligar() {
     estado.ligado = true;
     pill('online', 'Ligado');
     hint('hint-ligacao', 'Ligação estabelecida! 🩵', 'ok');
+    if (estado.auto) $('cartao-ligacao').hidden = true;
     mostrarCartoes(true);
     await carregarEstado();
     await carregarGuilds();
@@ -238,6 +252,7 @@ async function ligar() {
   } catch (erro) {
     estado.ligado = false;
     pill('erro', 'Sem ligação');
+    $('cartao-ligacao').hidden = false; // mostra o cartão para tentar de novo
     let msg = erro.message;
     if (window.location.protocol === 'https:' && erro instanceof TypeError) {
       msg += ' — o site é HTTPS, por isso a API do bot tem de responder em HTTPS '
@@ -617,6 +632,9 @@ $('select-guild').addEventListener('change', (e) => {
   carregarRanking(estado.rankTipo);
 });
 
-// Sessão do Discord + ligação automática se já tínhamos credenciais guardadas
+// Sessão do Discord + ligação automática
 initDiscord();
+if (estado.auto) {
+  hint('hint-ligacao', '🔗 Ligação automática ativa — o bot foi reconhecido sozinho.');
+}
 if (estado.url && estado.token) ligar();

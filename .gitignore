@@ -1,0 +1,18 @@
+# 🔒 Segredos — NUNCA subir para o GitHub
+.env
+bot/.env
+
+# 💾 Dados gerados em runtime
+bot/data/
+*.tmp
+
+# 🐍 Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 📦 Node / sistema
+node_modules/
+.DS_Store
