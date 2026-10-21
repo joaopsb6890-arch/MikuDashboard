@@ -20,5 +20,5 @@ O painel é só frontend. Para ele "reconhecer o bot" sozinho, o próprio bot pa
 - [x] 6. `main.py` — arranca bot + servidor juntos
 - [x] 7. Atualizar `app.js`/`index.html` do painel para auto-conectar
 - [x] 8. `requirements.txt`, `.env.example`, `.gitignore`, `README.md`
-- [ ] 9. Testar localmente (servidor web + API)
-- [ ] 10. Commit, push de branch e abrir Pull Request
+- [x] 9. Testar localmente (servidor web + API) — 25/25 testes + 8/8 cogs
+- [x] 10. Commit, push de branch e abrir Pull Request (#1)
